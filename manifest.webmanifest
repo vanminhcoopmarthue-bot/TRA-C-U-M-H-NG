@@ -1,0 +1,17 @@
+{
+  "name": "Tra cứu mã hàng",
+  "short_name": "Tra mã hàng",
+  "description": "Tra cứu SKU, tên hàng, quy cách, tồn kho và giá bán",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f7fb",
+  "theme_color": "#1457d9",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

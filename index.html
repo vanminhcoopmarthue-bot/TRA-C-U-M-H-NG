@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1457d9">
+  <meta name="description" content="Tra cứu SKU, tên hàng, quy cách, tồn kho và giá bán.">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icon.svg">
+  <title>Tra cứu mã hàng</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033;background:#f4f7fb}
+    *{box-sizing:border-box}body{margin:0}header{background:#1457d9;color:white;padding:20px 16px 24px}
+    .wrap{max-width:1000px;margin:auto}h1{font-size:24px;margin:0 0 6px}header p{margin:0;opacity:.9;font-size:14px}
+    main{max-width:1000px;margin:-12px auto 0;padding:0 12px 28px}
+    .searchbox{background:white;padding:14px;border-radius:16px;box-shadow:0 5px 24px #14284d12}
+    label{font-size:13px;font-weight:700;display:block;margin-bottom:8px}
+    .searchrow{display:flex;gap:8px}input{min-width:0;flex:1;font:inherit;font-size:16px;border:1px solid #d5ddeb;border-radius:10px;padding:13px 12px;outline:none}
+    input:focus{border-color:#1457d9;box-shadow:0 0 0 3px #1457d91c}
+    button{border:0;border-radius:10px;background:#1457d9;color:white;font:inherit;font-weight:700;padding:0 16px;cursor:pointer}
+    button.secondary{background:#eaf0fc;color:#1749a3;padding:10px 12px}
+    .hint{color:#65718a;font-size:12px;margin:9px 2px 0}.status{font-size:13px;color:#65718a;margin:16px 4px 10px}
+    .results{display:grid;gap:10px}.item{background:white;border:1px solid #e3e9f3;border-radius:14px;padding:14px;box-shadow:0 2px 8px #17203306}
+    .topline{display:flex;gap:10px;justify-content:space-between;align-items:flex-start}.sku{font-weight:800;font-size:17px;color:#1457d9;overflow-wrap:anywhere}
+    .pack{font-size:11px;background:#edf3ff;color:#234e9a;padding:5px 8px;border-radius:999px;white-space:nowrap}
+    .name{font-weight:650;margin:7px 0 12px;line-height:1.4;overflow-wrap:anywhere}
+    .facts{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fact{background:#f7f9fd;border-radius:9px;padding:9px}
+    .fact small{display:block;color:#68758e;font-size:11px;margin-bottom:3px}.fact strong{font-size:14px;overflow-wrap:anywhere}
+    .empty{background:white;border-radius:14px;padding:24px;text-align:center;color:#68758e}
+    footer{text-align:center;font-size:11px;color:#8490a5;padding:20px}
+    @media(min-width:650px){.results{grid-template-columns:repeat(2,minmax(0,1fr))}header{padding-top:28px}h1{font-size:28px}}
+  </style>
+</head>
+<body>
+<header><div class="wrap"><h1>Tra cứu mã hàng</h1><p>Tìm theo SKU, tên hàng hoặc mã tra chậm</p></div></header>
+<main>
+  <section class="searchbox">
+    <label for="query">Nhập mã SKU hoặc tên hàng</label>
+    <div class="searchrow">
+      <input id="query" type="search" placeholder="Ví dụ: yom dau, gau do, 3200655" autocomplete="off">
+      <button id="searchBtn" type="button">Tìm</button>
+    </div>
+    <p class="hint">Không cần dấu tiếng Việt. Có thể nhập nhiều từ, ví dụ: <b>yom dau</b>.</p>
+  </section>
+  <div id="status" class="status">Nhập từ khóa để bắt đầu tra cứu.</div>
+  <section id="results" class="results" aria-live="polite"></section>
+  <footer id="updated"></footer>
+</main>
+<script>
+  // Dán URL Web App của Apps Script sau khi Deploy vào đây.
+  const API_URL = "https://script.google.com/macros/s/AKfycbzFJmqJ0xxbF6Y8aPaTDsmve2EN_TV5DdE6xglXplnBZT6E0aJdEHdnuhKuQGzlxFbw/exec";
+  const input = document.getElementById('query');
+  const results = document.getElementById('results');
+  const statusEl = document.getElementById('status');
+  const updatedEl = document.getElementById('updated');
+  let callbackCounter = 0;
+  let activeScript = null;
+
+  function normalize(s) {
+    return String(s || '').toLowerCase().normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').replace(/đ/g,'d')
+      .replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+  }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+  function money(v) {
+    if (v === '' || v == null) return '—';
+    const n = Number(String(v).replace(/[,.\s₫đ]/g,''));
+    return Number.isFinite(n) ? n.toLocaleString('vi-VN') + ' ₫' : String(v);
+  }
+  function render(items) {
+    results.innerHTML = '';
+    if (!items.length) {
+      results.innerHTML = '<div class="empty">Không tìm thấy mã phù hợp. Thử nhập ít từ hơn hoặc một phần tên hàng.</div>';
+      return;
+    }
+    results.innerHTML = items.map(it => `
+      <article class="item">
+        <div class="topline"><div class="sku">${esc(it.sku)}</div><span class="pack">${esc(it.pack || 'Chưa phân loại')}</span></div>
+        <div class="name">${esc(it.name)}</div>
+        <div class="facts">
+          <div class="fact"><small>Tồn kho</small><strong>${esc(it.stock || '—')}</strong></div>
+          <div class="fact"><small>Giá bán</small><strong>${esc(money(it.price))}</strong></div>
+        </div>
+      </article>`).join('');
+  }
+  function search() {
+    const q = input.value.trim();
+    results.innerHTML = '';
+    updatedEl.textContent = '';
+    if (!q) { statusEl.textContent = 'Nhập từ khóa để bắt đầu tra cứu.'; return; }
+    if (!API_URL.startsWith('https://script.google.com/')) {
+      statusEl.textContent = 'App đã sẵn sàng giao diện. Cần dán URL Apps Script vào cấu hình để tra cứu dữ liệu thật.';
+      return;
+    }
+    statusEl.textContent = 'Đang tìm…';
+    if (activeScript) activeScript.remove();
+    const callbackName = '__lookupCallback' + (++callbackCounter);
+    const script = document.createElement('script');
+    activeScript = script;
+    const timeout = setTimeout(() => {
+      cleanup();
+      statusEl.textContent = 'Không kết nối được dữ liệu. Kiểm tra URL hoặc kết nối mạng.';
+    }, 15000);
+    function cleanup(){clearTimeout(timeout);script.remove();try{delete window[callbackName]}catch(e){}}
+    window[callbackName] = data => {
+      cleanup();
+      if (!data || !data.ok) { statusEl.textContent = 'Lỗi dữ liệu: ' + (data && data.error ? data.error : 'không rõ'); return; }
+      statusEl.textContent = `Tìm thấy ${data.count} kết quả (tối đa 100). Tổng dữ liệu: ${data.totalItems} mã hàng.`;
+      render(data.items || []);
+      updatedEl.textContent = 'Dữ liệu đọc trực tiếp từ Google Sheets · ' + new Date(data.updatedAt).toLocaleString('vi-VN');
+    };
+    script.onerror = () => { cleanup(); statusEl.textContent = 'Không tải được API. Hãy kiểm tra URL triển khai Apps Script.'; };
+    script.src = API_URL + (API_URL.includes('?') ? '&' : '?') +
+      'q=' + encodeURIComponent(q) + '&callback=' + callbackName + '&_=' + Date.now();
+    document.body.appendChild(script);
+  }
+  document.getElementById('searchBtn').addEventListener('click', search);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+  let debounce;
+  input.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(search, 450); });
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+  }
+</script>
+</body>
+</html>
